@@ -9,6 +9,7 @@ Kudos to [Mara Bos].
 
 ## Examples
 
-[Chapter 1: `std::sync::Condvar` example]: ch01/src/main.rs
+[Chapter 1: `std::sync::Condvar` example](ch01/src/main.rs)
+
 
 Happy Hacking!
