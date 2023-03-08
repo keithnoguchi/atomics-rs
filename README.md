@@ -7,7 +7,11 @@ https://github.com/keithnoguchi/atomics-rs/actions)
 
 Kudos to [Mara Bos].
 
-# Examples
+## Examples
+
+[chapter 1]: ch01/src/main.rs
+
+`std::sync::Condvar` example from [chapter 1].
 
 ```
 use std::collections::VecDeque;
