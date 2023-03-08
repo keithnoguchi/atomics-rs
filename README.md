@@ -26,7 +26,7 @@ fn main() {
     thread::scope(|s| {
         // consumers.
         for _ in 0..100 {
-            s.spawn(|| {
+            s.spawn(|| loop {
                 let mut q = q.lock().unwrap();
                 let item = loop {
                     if let Some(item) = q.pop_front() {
