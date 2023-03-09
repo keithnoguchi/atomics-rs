@@ -1,34 +1,52 @@
-use std::io::stdin;
-use std::sync::atomic::AtomicBool;
+//! Multi worker job reporting.
+
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
 use std::thread;
 use std::time::Duration;
 
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+fn main() {
+    let completed = &AtomicUsize::new(0);
+    let total_jobs = || {
+        static NR_TASKS: AtomicUsize = AtomicUsize::new(0);
+        loop {
+            let nr_tasks = NR_TASKS.load(Relaxed);
+            if nr_tasks != 0 {
+                break nr_tasks;
+            } else {
+                NR_TASKS.store(4 * 30, Relaxed);
+                dbg!(NR_TASKS.load(Relaxed));
+            }
+        }
+    };
+    let main_thread = thread::current();
+    let work = |id| {
+        thread::sleep(Duration::from_millis(100));
+        if id % 6 == 0 {
+            main_thread.unpark();
+        }
+    };
 
-fn main() -> Result<()> {
-    static STOP: AtomicBool = AtomicBool::new(false);
-    let work = || thread::sleep(Duration::from_millis(10));
+    thread::scope(|s| {
+        // workers.
+        (0..4).for_each(|id| {
+            s.spawn(move || {
+                let jobs = total_jobs() / 4;
+                (0..jobs).for_each(|item_id| {
+                    work(jobs * id + item_id);
+                    completed.fetch_add(1, Relaxed);
+                });
+            });
+        });
 
-    // A worker thread.
-    let worker = thread::spawn(move || {
-        while !STOP.load(Relaxed) {
-            work();
+        // a reporter.
+        loop {
+            let completed = completed.load(Relaxed);
+            println!("{completed}/{} done", total_jobs());
+            if completed == total_jobs() {
+                break;
+            }
+            thread::park_timeout(Duration::from_secs(1));
         }
     });
-
-    // A main thread supporting the operator.
-    for line in stdin().lines() {
-        match line?.as_str() {
-            "q" | "quit" => break,
-            "help" => println!("usage: q"),
-            word => println!("got {word:?}, type \"q\"."),
-        }
-    }
-
-    // Set the stop flag and wait for the worker to complete.
-    STOP.store(true, Relaxed);
-    worker.join().expect("worker paniced");
-
-    Ok(())
 }
