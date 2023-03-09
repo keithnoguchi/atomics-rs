@@ -1,42 +1,58 @@
-//! ID allocation without the overflow
+//! Lazy One-time Initialization with Race
 
-use std::sync::atomic::AtomicU8;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicI8;
 use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn main() {
-    static NEXT_ID: AtomicU8 = AtomicU8::new(0);
-    let get_id = || {
-        let mut id = NEXT_ID.load(Relaxed);
-        loop {
-            assert!(id < 5, "too many IDs");
-            match NEXT_ID.compare_exchange(id, id + 1, Relaxed, Relaxed) {
-                Ok(_) => break id,
-                Err(v) => id = v,
+    let start = Instant::now();
+    let get_key = || {
+        static KEY: AtomicI8 = AtomicI8::new(-1);
+        let key = KEY.load(Relaxed);
+        if key == -1 {
+            let new_key = start.elapsed().as_nanos() as i8;
+            match KEY.compare_exchange(-1, new_key, Relaxed, Relaxed) {
+                Ok(_) => new_key,
+                Err(key) => key,
             }
+        } else {
+            key
         }
     };
 
+    let reporter = &thread::current();
+    let delay = &|id| Duration::from_millis(id % 3_u64 + 1) * 100;
+    let result = &Arc::new(Mutex::new(HashMap::new()));
     thread::scope(|s| {
-        // workers.
-        (0..6).for_each(|id| {
+        // let the workers to race, like miners.
+        (0..100).for_each(|id| {
             s.spawn(move || {
-                let tid = thread::current().id();
-                let delay = id % 3_u64 * 100;
-                thread::sleep(Duration::from_millis(delay));
-                let retrieved_id = get_id();
-                println!("worker{id} {tid:?} with {retrieved_id} done");
+                thread::sleep(delay(id));
+                let key = get_key();
+                result.lock().unwrap().insert(id, key);
+                reporter.unpark();
             });
         });
 
-        // a reporter.
+        // make sure everyone has the same key.
+        let done = || result.lock().unwrap().len() == 100;
         loop {
-            let id = NEXT_ID.load(Relaxed);
-            if id == 5 {
+            if !done() {
+                thread::park_timeout(Duration::from_secs(1));
+            } else {
+                let expected = get_key();
+                let wrong = result
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .filter(|&got| got == &expected)
+                    .count();
+                assert!(wrong == 100, "some values are wrong");
                 break;
             }
-            thread::sleep(Duration::from_secs(1));
         }
     });
 }
