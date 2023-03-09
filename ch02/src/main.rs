@@ -1,4 +1,4 @@
-//! Multi worker job reporting.
+//! Multi worker job reporting with fetch_add().
 
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
