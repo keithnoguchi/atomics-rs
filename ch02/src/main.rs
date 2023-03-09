@@ -23,7 +23,7 @@ fn main() {
         (0..6).for_each(|id| {
             s.spawn(move || {
                 let tid = thread::current().id();
-                let delay = id % 3 as u64 * 100;
+                let delay = id % 3_u64 * 100;
                 thread::sleep(Duration::from_millis(delay));
                 let retrieved_id = get_id();
                 println!("worker{id} {tid:?} with {retrieved_id} done");
