@@ -28,12 +28,14 @@ fn main() {
     };
 
     let result = Arc::new(Mutex::new(HashMap::new()));
+    let main_thread = &thread::current();
     thread::scope(|s| {
         // get the data from 100 workers.
         (0..100).for_each(|id| {
             let result = result.clone();
             s.spawn(move || {
                 result.lock().unwrap().insert(id, get_data());
+                main_thread.unpark();
             });
         });
 
