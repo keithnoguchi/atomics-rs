@@ -33,29 +33,31 @@ impl SpinLock {
 
 fn main() {
     static LOCK: SpinLock = SpinLock::new();
-    static mut DATA: u8 = 0;
+    static mut DATA: String = String::new();
     let validator = thread::current();
 
     thread::scope(|s| {
-        // workers.
-        let increment = || {
-            LOCK.lock();
-            unsafe {
-                DATA += 1;
+        // 5 workers.
+        let work = || {
+            for _ in 0..20 {
+                LOCK.lock();
+                unsafe {
+                    DATA.push('!');
+                }
+                LOCK.unlock();
             }
-            LOCK.unlock();
             validator.unpark();
         };
-        for _ in 0..100 {
-            s.spawn(increment);
+        for _ in 0..5 {
+            s.spawn(work);
         }
 
         // a validator.
         let validate = || {
             LOCK.lock();
-            let count = unsafe { DATA };
+            let len = unsafe { DATA.len() };
             LOCK.unlock();
-            count
+            len
         };
         while validate() != 100 {
             println!("waiting...");
