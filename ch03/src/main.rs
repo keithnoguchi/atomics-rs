@@ -1,10 +1,10 @@
 //! A lazy one-time non-atomic value initialization
 
 use std::collections::HashMap;
+use std::ptr;
 use std::sync::atomic::AtomicPtr;
 use std::sync::atomic::Ordering::{Acquire, Release};
 use std::sync::{Arc, Mutex};
-use std::ptr;
 use std::thread;
 use std::time::Duration;
 
