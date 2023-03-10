@@ -1,46 +1,58 @@
-//! A basic spin lock with Acquire and Release.
+//! A lazy one-time non-atomic value initialization
 
-use std::sync::atomic::AtomicBool;
+use std::collections::HashMap;
+use std::sync::atomic::AtomicPtr;
 use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::{Arc, Mutex};
+use std::ptr;
 use std::thread;
 use std::time::Duration;
 
+#[derive(PartialEq)]
+struct Data;
+
 fn main() {
-    static mut DATA: String = String::new();
-    static LOCKED: AtomicBool = AtomicBool::new(false);
-    let verifier = thread::current();
-    let work = || loop {
-        if !LOCKED.swap(true, Acquire) {
-            unsafe {
-                DATA.push('!');
+    let get_data = || -> &'static Data {
+        static PTR: AtomicPtr<Data> = AtomicPtr::new(ptr::null_mut());
+
+        let mut p = PTR.load(Acquire);
+        if p.is_null() {
+            let data = Box::into_raw(Box::new(Data));
+            if let Err(v) = PTR.compare_exchange(ptr::null_mut(), data, Release, Acquire) {
+                // lose the race.
+                drop(unsafe { Box::from_raw(p) });
+                p = v;
             }
-            LOCKED.store(false, Release);
-            verifier.unpark();
-            return;
         }
+        unsafe { &*p }
     };
 
+    let result = Arc::new(Mutex::new(HashMap::new()));
     thread::scope(|s| {
-        // workers.
-        (0..100).for_each(|_| {
-            s.spawn(work);
+        // get the data from 100 workers.
+        (0..100).for_each(|id| {
+            let result = result.clone();
+            s.spawn(move || {
+                result.lock().unwrap().insert(id, get_data());
+            });
         });
 
-        // a verifier.
+        // wait for the completion.
         loop {
-            while LOCKED.load(Acquire) {
-                std::hint::spin_loop();
-            }
-            let len = unsafe { DATA.len() };
-            if len == 100 {
+            let result = result.lock().unwrap().len();
+            if result == 100 {
                 break;
             }
-            thread::sleep(Duration::from_secs(1));
+            println!("waiting...");
+            thread::park_timeout(Duration::from_secs(1));
         }
-
-        unsafe {
-            assert_eq!(DATA.len(), 100);
-            DATA.chars().for_each(|c| assert_eq!(c, '!'));
-        }
+        let expected = get_data();
+        let correct = result
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|&got| *got == expected)
+            .count();
+        assert_eq!(correct, 100);
     });
 }
