@@ -31,32 +31,36 @@ impl SpinLock {
     }
 }
 
-static LOCK: SpinLock = SpinLock::new();
-
 fn main() {
+    static LOCK: SpinLock = SpinLock::new();
     static mut DATA: u8 = 0;
-    let increment = || {
-        LOCK.lock();
-        unsafe {
-            DATA += 1;
+    let validator = thread::current();
+
+    thread::scope(|s| {
+        // workers.
+        let increment = || {
+            LOCK.lock();
+            unsafe {
+                DATA += 1;
+            }
+            LOCK.unlock();
+            validator.unpark();
+        };
+        for _ in 0..100 {
+            s.spawn(increment);
         }
-        LOCK.unlock();
-    };
 
-    // workers.
-    for _i in 0..100 {
-        thread::spawn(increment);
-    }
-
-    // a validator.
-    let get = || -> u8 {
-        LOCK.lock();
-        let result = unsafe { DATA };
-        LOCK.unlock();
-        result
-    };
-    while get() != 100 {
-        thread::park_timeout(Duration::from_secs(1));
-    }
-    assert_eq!(get(), 100);
+        // a validator.
+        let validate = || {
+            LOCK.lock();
+            let count = unsafe { DATA };
+            LOCK.unlock();
+            count
+        };
+        while validate() != 100 {
+            println!("waiting...");
+            thread::park_timeout(Duration::from_secs(1));
+        }
+        assert_eq!(validate(), 100);
+    });
 }
