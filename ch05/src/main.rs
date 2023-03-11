@@ -1,21 +1,64 @@
-//! A *safe* one-shot channel through panic
+//! A safe one-shot channel through types.
 #![forbid(missing_debug_implementations)]
 
 use std::cell::UnsafeCell;
 use std::mem::MaybeUninit;
-use std::sync::atomic::AtomicU8;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
-const EMPTY: u8 = 0;
-const WRITING: u8 = 1;
-const READY: u8 = 2;
-const READING: u8 = 3;
+pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
+    let channel = Arc::new(Channel::default());
+
+    (
+        Sender {
+            channel: channel.clone(),
+        },
+        Receiver { channel },
+    )
+}
 
 #[derive(Debug)]
-pub struct Channel<T> {
-    msg: UnsafeCell<MaybeUninit<T>>,
-    state: AtomicU8,
+pub struct Sender<T> {
+    channel: Arc<Channel<T>>,
+}
+
+impl<T> Sender<T> {
+    pub fn send(self, msg: T) {
+        unsafe {
+            (*self.channel.data.get()).write(msg);
+        }
+        self.channel.ready.store(true, Release);
+    }
+}
+
+#[derive(Debug)]
+pub struct Receiver<T> {
+    channel: Arc<Channel<T>>,
+}
+
+impl<T> Receiver<T> {
+    pub fn is_ready(&self) -> bool {
+        self.channel.ready.load(Relaxed)
+    }
+
+    /// # Panics
+    ///
+    /// It panics when there is no message on the channel yet.
+    pub fn receive(self) -> T {
+        if !self.channel.ready.swap(false, Acquire) {
+            panic!("no message on the channel");
+        }
+        unsafe { (*self.channel.data.get()).assume_init_read() }
+    }
+}
+
+#[derive(Debug)]
+struct Channel<T> {
+    ready: AtomicBool,
+    data: UnsafeCell<MaybeUninit<T>>,
 }
 
 unsafe impl<T> Sync for Channel<T> where T: Send {}
@@ -23,68 +66,38 @@ unsafe impl<T> Sync for Channel<T> where T: Send {}
 impl<T> Default for Channel<T> {
     fn default() -> Self {
         Self {
-            msg: UnsafeCell::new(MaybeUninit::uninit()),
-            state: AtomicU8::new(EMPTY),
+            ready: AtomicBool::new(false),
+            data: UnsafeCell::new(MaybeUninit::uninit()),
         }
     }
 }
 
-impl<T> Channel<T> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn is_ready(&self) -> bool {
-        self.state.load(Relaxed) == READY
-    }
-
-    /// # Panics
-    ///
-    /// It panics with multiple sends.
-    pub fn send(&self, msg: T) {
-        if self
-            .state
-            .compare_exchange(EMPTY, WRITING, Relaxed, Relaxed)
-            .is_err()
-        {
-            panic!("it's already in use");
+impl<T> Drop for Channel<T> {
+    fn drop(&mut self) {
+        if self.ready.load(Acquire) {
+            unsafe {
+                (*self.data.get()).assume_init_drop();
+            }
         }
-        unsafe {
-            (*self.msg.get()).write(msg);
-        }
-        self.state.store(READY, Release);
-    }
-
-    /// # Panics
-    ///
-    /// It panics when there is no message.
-    pub fn recv(&self) -> T {
-        if self
-            .state
-            .compare_exchange(READY, READING, Acquire, Relaxed)
-            .is_err()
-        {
-            panic!("there is no message");
-        }
-        unsafe { (*self.msg.get()).assume_init_read() }
     }
 }
 
 fn main() {
-    let channel = Channel::new();
-    let current = thread::current();
+    let (tx, rx) = channel();
+    let consumer = thread::current();
 
     thread::scope(|s| {
-        // a writer.
+        // a producer.
         s.spawn(|| {
-            channel.send("hello, world!");
-            current.unpark();
+            tx.send(String::from("hello, world!"));
+            consumer.unpark();
         });
     });
 
-    // a reader.
-    if !channel.is_ready() {
-        thread::park();
+    // a consumer.
+    if !rx.is_ready() {
+        thread::park_timeout(Duration::from_secs(1));
     }
-    assert_eq!(channel.recv(), "hello, world!");
+    let msg = rx.receive();
+    assert_eq!(msg, String::from("hello, world!"));
 }
