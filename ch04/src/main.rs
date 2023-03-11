@@ -1,13 +1,14 @@
-//! An unsafe spin lock
+//! A *safe* spin lock
+
+#![forbid(missing_debug_implementations)]
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
-use std::time::Duration;
 
 #[derive(Debug)]
-pub struct SpinLock<T> {
+struct SpinLock<T> {
     locked: AtomicBool,
     value: UnsafeCell<T>,
 }
@@ -22,62 +23,42 @@ impl<T> SpinLock<T> {
         }
     }
 
-    #[allow(clippy::mut_from_ref)]
-    pub fn lock(&self) -> &mut T {
-        while self.locked.swap(true, Acquire) {
+    pub fn lock(&self) -> Guard<T> {
+        while self
+            .locked
+            .compare_exchange(false, true, Acquire, Relaxed)
+            .is_err()
+        {
             std::hint::spin_loop();
         }
-        unsafe { &mut *self.value.get() }
+        Guard { lock: self }
     }
+}
 
-    /// # Safety
-    ///
-    /// `&mut T` from `lock()` must be gone!
-    pub unsafe fn unlock(&self) {
-        self.locked.store(false, Release);
+#[derive(Debug)]
+struct Guard<'a, T> {
+    lock: &'a SpinLock<T>,
+}
+
+impl<T> Drop for Guard<'_, T> {
+    fn drop(&mut self) {
+        self.lock.locked.store(false, Release);
     }
 }
 
 fn main() {
-    let validator = thread::current();
-    let state = SpinLock::new(String::new());
+    let data = &SpinLock::new(Vec::<char>::new());
+    println!("{data:?}");
 
     thread::scope(|s| {
-        // workers.
-        let work = || {
-            for _ in 0..20 {
-                let value = state.lock();
-                value.push('!');
-                unsafe {
-                    state.unlock();
+        for id in 0..5 {
+            s.spawn(move || {
+                for _ in 0..20 {
+                    let data = data.lock();
+                    println!("worker{id}: {data:?}");
                 }
-            }
-            validator.unpark();
-        };
-        for _ in 0..5 {
-            s.spawn(work);
-        }
-
-        // a validator.
-        loop {
-            let value = state.lock();
-            if value.len() == 100 {
-                unsafe {
-                    state.unlock();
-                }
-                break;
-            }
-            unsafe {
-                state.unlock();
-            };
-            thread::park_timeout(Duration::from_secs(1));
-        }
-        // wait a bit before double checking.
-        thread::sleep(Duration::from_millis(1));
-        let value = state.lock();
-        assert_eq!(value.len(), 100);
-        unsafe {
-            state.unlock();
+            });
         }
     });
+    println!("{data:?}");
 }
