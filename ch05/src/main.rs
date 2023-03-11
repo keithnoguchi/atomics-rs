@@ -1,21 +1,27 @@
-//! A channel
+//! A *safe* one-shot channel through panic
 #![forbid(missing_debug_implementations)]
 
-use std::collections::VecDeque;
-use std::sync::{Condvar, Mutex};
+use std::cell::UnsafeCell;
+use std::mem::MaybeUninit;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
 
 #[derive(Debug)]
 pub struct Channel<T> {
-    q: Mutex<VecDeque<T>>,
-    is_ready: Condvar,
+    msg: UnsafeCell<MaybeUninit<T>>,
+    in_use: AtomicBool,
+    ready: AtomicBool,
 }
+
+unsafe impl<T> Sync for Channel<T> where T: Send {}
 
 impl<T> Default for Channel<T> {
     fn default() -> Self {
         Self {
-            q: Mutex::new(VecDeque::new()),
-            is_ready: Condvar::new(),
+            msg: UnsafeCell::new(MaybeUninit::uninit()),
+            in_use: AtomicBool::new(false),
+            ready: AtomicBool::new(false),
         }
     }
 }
@@ -25,48 +31,49 @@ impl<T> Channel<T> {
         Self::default()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.q.lock().unwrap().is_empty()
+    pub fn is_ready(&self) -> bool {
+        self.ready.load(Relaxed)
     }
 
+    /// # Panics
+    ///
+    /// It panics with multiple sends.
     pub fn send(&self, msg: T) {
-        self.q.lock().unwrap().push_back(msg);
-        self.is_ready.notify_one();
+        if self.in_use.swap(true, Relaxed) {
+            panic!("it's already in use");
+        }
+        unsafe {
+            (*self.msg.get()).write(msg);
+        }
+        self.ready.store(true, Release);
     }
 
+    /// # Panics
+    ///
+    /// It panics when there is no message.
     pub fn recv(&self) -> T {
-        let mut q = self.q.lock().unwrap();
-        loop {
-            if let Some(msg) = q.pop_front() {
-                return msg;
-            }
-            q = self.is_ready.wait(q).unwrap();
+        if !self.ready.load(Acquire) {
+            panic!("there is no message");
         }
+        unsafe { (*self.msg.get()).assume_init_read() }
     }
 }
 
 fn main() {
-    let ch = &Channel::new();
+    let channel = Channel::new();
+    let current = thread::current();
 
     thread::scope(|s| {
-        // producers.
-        for id in 0..5 {
-            s.spawn(move || {
-                for msg in 0..1000 {
-                    ch.send(format!("worker{id}: #{msg} msg"));
-                }
-            });
-        }
-
-        // consumers.
-        for _ in 0..10 {
-            s.spawn(|| {
-                for _ in 0..500 {
-                    let _ = ch.recv();
-                }
-            });
-        }
+        // a writer.
+        s.spawn(|| {
+            channel.send("hello, world!");
+            current.unpark();
+        });
     });
 
-    assert!(ch.is_empty());
+    // a reader.
+    if !channel.is_ready() {
+        thread::park();
+    }
+    assert_eq!(channel.recv(), "hello, world!");
 }
