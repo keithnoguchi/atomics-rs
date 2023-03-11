@@ -59,7 +59,9 @@ fn main() {
         loop {
             let value = state.lock();
             if value.len() == 100 {
-                unsafe { state.unlock(); }
+                unsafe {
+                    state.unlock();
+                }
                 break;
             }
             unsafe {
