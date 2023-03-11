@@ -12,7 +12,7 @@ pub struct SpinLock<T> {
     value: UnsafeCell<T>,
 }
 
-unsafe impl<T> Sync for SpinLock<T> {}
+unsafe impl<T> Sync for SpinLock<T> where T: Send {}
 
 impl<T> SpinLock<T> {
     pub const fn new(value: T) -> Self {
