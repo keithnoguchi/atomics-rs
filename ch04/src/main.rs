@@ -3,7 +3,7 @@
 #![forbid(missing_debug_implementations)]
 
 use std::cell::UnsafeCell;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
@@ -55,19 +55,32 @@ impl<T> Deref for Guard<'_, T> {
     }
 }
 
+impl<T> DerefMut for Guard<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { &mut *self.lock.value.get() }
+    }
+}
+
 fn main() {
-    let data = &SpinLock::new(Vec::<char>::new());
-    println!("{data:?}");
+    let data = &SpinLock::new(vec![]);
 
     thread::scope(|s| {
-        for id in 0..5 {
+        for id in 0..2 {
             s.spawn(move || {
-                for _ in 0..20 {
-                    let data = data.lock();
-                    println!("worker{id}: {:?}", *data);
+                for _ in 0..2 {
+                    data.lock().push(id);
                 }
             });
         }
     });
-    println!("{data:?}");
+
+    let data = data.lock();
+    assert!(
+        data.as_ref() == [0, 0, 1, 1]
+            || data.as_ref() == [0, 1, 0, 1]
+            || data.as_ref() == [0, 1, 1, 0]
+            || data.as_ref() == [1, 0, 0, 1]
+            || data.as_ref() == [1, 0, 1, 0]
+            || data.as_ref() == [1, 1, 0, 0],
+    );
 }
