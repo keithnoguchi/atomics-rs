@@ -11,12 +11,18 @@ pub struct Channel<T> {
     is_ready: Condvar,
 }
 
-impl<T> Channel<T> {
-    pub fn new() -> Self {
+impl<T> Default for Channel<T> {
+    fn default() -> Self {
         Self {
             q: Mutex::new(VecDeque::new()),
             is_ready: Condvar::new(),
         }
+    }
+}
+
+impl<T> Channel<T> {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn is_empty(&self) -> bool {
