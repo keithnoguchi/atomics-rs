@@ -3,6 +3,7 @@
 #![forbid(missing_debug_implementations)]
 
 use std::cell::UnsafeCell;
+use std::ops::Deref;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
@@ -46,6 +47,14 @@ impl<T> Drop for Guard<'_, T> {
     }
 }
 
+impl<T> Deref for Guard<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.lock.value.get() }
+    }
+}
+
 fn main() {
     let data = &SpinLock::new(Vec::<char>::new());
     println!("{data:?}");
@@ -55,7 +64,7 @@ fn main() {
             s.spawn(move || {
                 for _ in 0..20 {
                     let data = data.lock();
-                    println!("worker{id}: {data:?}");
+                    println!("worker{id}: {:?}", *data);
                 }
             });
         }
