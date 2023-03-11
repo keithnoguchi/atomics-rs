@@ -2,6 +2,7 @@
 #![forbid(missing_debug_implementations)]
 
 use std::cell::UnsafeCell;
+use std::collections::HashMap;
 use std::mem::MaybeUninit;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
@@ -89,7 +90,9 @@ fn main() {
     thread::scope(|s| {
         // a producer.
         s.spawn(|| {
-            tx.send(String::from("hello, world!"));
+            let mut state = HashMap::new();
+            state.insert("hello".to_string(), "world");
+            tx.send(state);
             consumer.unpark();
         });
     });
@@ -98,6 +101,7 @@ fn main() {
     if !rx.is_ready() {
         thread::park_timeout(Duration::from_secs(1));
     }
-    let msg = rx.receive();
-    assert_eq!(msg, String::from("hello, world!"));
+    let state = rx.receive();
+    assert!(state.len() == 1);
+    assert_eq!(state.get("hello"), Some(&"world"));
 }
