@@ -59,6 +59,10 @@ impl<T> Arc<T> {
             },
         }
     }
+
+    pub fn downgrade(this: &Self) -> Weak<T> {
+        this.weak.clone()
+    }
 }
 
 #[derive(Debug)]
@@ -129,9 +133,22 @@ fn main() {
                 assert_eq!(DROP_COUNT.load(Relaxed), 0);
             });
         }
+
+        // test Arc::<T>::downgrade().
+        for _ in 0..5 {
+            let weak = Arc::downgrade(&data);
+            s.spawn(|| {
+                dbg!(weak);
+                assert_eq!(DROP_COUNT.load(Relaxed), 0);
+            });
+        }
     });
     assert_eq!(DROP_COUNT.load(Relaxed), 0);
     dbg!(&*data);
+    let weak = Arc::downgrade(&data);
     dbg!(data);
     assert_eq!(DROP_COUNT.load(Relaxed), 1);
+    // make sure it's still there, even if the data itself
+    // had been dropped.
+    dbg!(weak);
 }
