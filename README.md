@@ -4,8 +4,9 @@
 https://github.com/keithnoguchi/atomics-rs/actions)
 
 [mara bos]: https://m-ou.se/
+[the library team]: https://www.rust-lang.org/governance/teams/library
 
-Kudos to [Mara Bos].
+Kudos to [Mara Bos] and [the libray team].
 
 ## Examples
 
