@@ -4,8 +4,9 @@
 https://github.com/keithnoguchi/atomics-rs/actions)
 
 [mara bos]: https://m-ou.se/
+[the library team]: https://www.rust-lang.org/governance/teams/library
 
-Kudos to [Mara Bos].
+Kudos to [Mara Bos] and [the library team].
 
 ## Examples
 
@@ -14,5 +15,6 @@ Kudos to [Mara Bos].
 - [Chapter 3: A memory fence with `Acquire`, `Relaxed`, and `Release`](ch03/src/main.rs)
 - [Chapter 4: A spin lock](ch04/src/main.rs)
 - [Chapter 5: An one-shot channel](ch05/src/main.rs)
+- [Chapter 6: An `Arc<T>` and `Weak<T>`](ch06/src/main.rs)
 
 Happy Hacking!
