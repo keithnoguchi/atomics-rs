@@ -3,6 +3,7 @@
 #![forbid(missing_debug_implementations)]
 
 use std::cell::UnsafeCell;
+use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::atomic::fence;
 use std::sync::atomic::AtomicUsize;
@@ -33,6 +34,16 @@ impl<T> Drop for Arc<T> {
                 *ptr = None;
             }
         }
+    }
+}
+
+impl<T> Deref for Arc<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        let ptr = self.weak.data().data.get();
+        // Safety: There is a data as it's Arc.
+        unsafe { (*ptr).as_ref().unwrap() }
     }
 }
 
@@ -120,6 +131,7 @@ fn main() {
         }
     });
     assert_eq!(DROP_COUNT.load(Relaxed), 0);
+    dbg!(&*data);
     dbg!(data);
     assert_eq!(DROP_COUNT.load(Relaxed), 1);
 }
