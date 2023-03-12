@@ -2,6 +2,7 @@
 
 #![forbid(missing_debug_implementations)]
 
+use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::atomic::fence;
 use std::sync::atomic::AtomicUsize;
@@ -32,12 +33,20 @@ impl<T> Drop for Arc<T> {
     }
 }
 
+impl<T> Deref for Arc<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data().data
+    }
+}
+
 impl<T> Arc<T> {
     pub fn new(data: T) -> Self {
         Self {
             ptr: NonNull::from(Box::leak(Box::new(Data {
                 ref_count: AtomicUsize::new(1),
-                _data: data,
+                data,
             }))),
         }
     }
@@ -50,7 +59,7 @@ impl<T> Arc<T> {
 #[derive(Debug)]
 struct Data<T> {
     ref_count: AtomicUsize,
-    _data: T,
+    data: T,
 }
 
 fn main() {
@@ -63,8 +72,8 @@ fn main() {
         }
     }
 
-    let data = Arc::new(("data".to_string(), DropMonitor));
-    println!("{:?}: {data:?}", thread::current().id());
+    let data = Arc::new(("hello".to_string(), DropMonitor));
+    println!("{:?}: {data:?}, {:?}", thread::current().id(), *data);
     thread::scope(|s| {
         // workers.
         for _ in 0..5 {
@@ -73,7 +82,7 @@ fn main() {
                 for _ in 0..1000 {
                     let _data = data.clone();
                 }
-                println!("{:?}: {data:?}", thread::current().id());
+                println!("{:?}: {data:?}, {:?}", thread::current().id(), *data);
             });
         }
     });
