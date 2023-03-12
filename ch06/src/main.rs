@@ -13,12 +13,23 @@ pub struct Arc<T> {
     weak: Weak<T>,
 }
 
+impl<T> Clone for Arc<T> {
+    fn clone(&self) -> Self {
+        let weak = self.weak.clone();
+        if self.weak.data().data_ref_count.fetch_add(1, Relaxed) > usize::MAX / 2 {
+            std::process::abort();
+        }
+        Self { weak }
+    }
+}
+
 impl<T> Drop for Arc<T> {
     fn drop(&mut self) {
         if self.weak.data().data_ref_count.fetch_sub(1, Release) == 1 {
             fence(Acquire);
+            let ptr = self.weak.data().data.get();
             unsafe {
-                *self.weak.ptr.as_mut().data.get_mut() = None;
+                *ptr = None;
             }
         }
     }
@@ -43,6 +54,26 @@ pub struct Weak<T> {
     ptr: NonNull<Data<T>>,
 }
 
+impl<T> Clone for Weak<T> {
+    fn clone(&self) -> Self {
+        if self.data().alloc_ref_count.fetch_add(1, Relaxed) > usize::MAX / 2 {
+            std::process::abort();
+        }
+        Self { ptr: self.ptr }
+    }
+}
+
+impl<T> Drop for Weak<T> {
+    fn drop(&mut self) {
+        if self.data().alloc_ref_count.fetch_sub(1, Release) == 1 {
+            fence(Acquire);
+            unsafe {
+                drop(Box::from_raw(self.ptr.as_ptr()));
+            }
+        }
+    }
+}
+
 impl<T> Weak<T> {
     fn data(&self) -> &Data<T> {
         unsafe { self.ptr.as_ref() }
@@ -57,17 +88,6 @@ struct Data<T> {
 }
 
 fn main() {
-    static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
-    #[derive(Debug)]
-    struct DropMonitor;
-    impl Drop for DropMonitor {
-        fn drop(&mut self) {
-            DROP_COUNT.fetch_add(1, Relaxed);
-        }
-    }
-
-    let data = Arc::new((String::from("hello"), DropMonitor));
-    println!("{data:?}");
-    drop(data);
-    assert_eq!(DROP_COUNT.load(Acquire), 1);
+    let arc = Arc::new(String::from("hello"));
+    dbg!(arc);
 }
