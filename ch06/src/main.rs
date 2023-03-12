@@ -97,6 +97,12 @@ fn main() {
         }
     }
     let a = Arc::new((String::from("hello"), DropMonitor));
+    let b = a.clone();
+    let c = a.clone();
     dbg!(a);
+    assert_eq!(DROP_COUNT.load(Relaxed), 0);
+    dbg!(b);
+    assert_eq!(DROP_COUNT.load(Relaxed), 0);
+    dbg!(c);
     assert_eq!(DROP_COUNT.load(Relaxed), 1);
 }
