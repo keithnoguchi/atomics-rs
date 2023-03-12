@@ -6,10 +6,21 @@ use std::ptr::NonNull;
 use std::sync::atomic::fence;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed};
+use std::thread;
 
 #[derive(Debug)]
 pub struct Arc<T> {
     ptr: NonNull<Data<T>>,
+}
+
+unsafe impl<T> Send for Arc<T> where T: Send + Sync {}
+unsafe impl<T> Sync for Arc<T> where T: Send + Sync {}
+
+impl<T> Clone for Arc<T> {
+    fn clone(&self) -> Self {
+        self.data().ref_count.fetch_add(1, Relaxed);
+        Self { ptr: self.ptr }
+    }
 }
 
 impl<T> Drop for Arc<T> {
@@ -43,17 +54,29 @@ struct Data<T> {
 }
 
 fn main() {
-    static DROPPED: AtomicUsize = AtomicUsize::new(0);
     #[derive(Debug)]
     struct DropMonitor;
+    static DROPPED: AtomicUsize = AtomicUsize::new(0);
     impl Drop for DropMonitor {
         fn drop(&mut self) {
             DROPPED.fetch_add(1, Relaxed);
         }
     }
 
-    let arc = Arc::new(("hello", DropMonitor));
-    println!("{arc:?}");
-    drop(arc);
+    let data = Arc::new(("data".to_string(), DropMonitor));
+    println!("{:?}: {data:?}", thread::current().id());
+    thread::scope(|s| {
+        // workers.
+        for _ in 0..5 {
+            let data = data.clone();
+            s.spawn(move || {
+                for _ in 0..1000 {
+                    let _data = data.clone();
+                }
+                println!("{:?}: {data:?}", thread::current().id());
+            });
+        }
+    });
+    drop(data);
     assert_eq!(DROPPED.load(Relaxed), 1);
 }
