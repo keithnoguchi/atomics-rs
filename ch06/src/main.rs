@@ -60,6 +60,21 @@ impl<T> Arc<T> {
         }
     }
 
+    pub fn get_mut(this: &mut Self) -> Option<&mut T> {
+        if this.weak.data().alloc_ref_count.load(Relaxed) == 1 {
+            fence(Acquire);
+            // Safety: nothing else can access the data.
+            let arcdata = unsafe { this.weak.ptr.as_mut() };
+            let option = arcdata.data.get_mut();
+            // Safety: the data is still there based on the
+            // alloc_ref_count above.
+            let data = option.as_mut().unwrap();
+            Some(data)
+        } else {
+            None
+        }
+    }
+
     pub fn downgrade(this: &Self) -> Weak<T> {
         this.weak.clone()
     }
@@ -115,7 +130,12 @@ fn main() {
             DROP_COUNT.fetch_add(1, Relaxed);
         }
     }
-    let data = Arc::new((String::from("hello"), DropMonitor));
+    let mut data = Arc::new((String::from("hello"), DropMonitor));
+
+    // test Arc::get_mut().
+    let (string, _) = Arc::get_mut(&mut data).unwrap();
+    string.push_str(", world!");
+
     thread::scope(|s| {
         // tests Send for Arc<T>.
         for _ in 0..10 {
@@ -126,7 +146,7 @@ fn main() {
             });
         }
 
-        // tests Sync for Arc<T>
+        // tests Sync for Arc<T>.
         for _ in 0..5 {
             s.spawn(|| {
                 eprintln!("{:?}: {data:#?}", thread::current());
