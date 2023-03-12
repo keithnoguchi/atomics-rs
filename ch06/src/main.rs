@@ -109,6 +109,25 @@ impl<T> Drop for Weak<T> {
 }
 
 impl<T> Weak<T> {
+    pub fn upgrade(&self) -> Option<Arc<T>> {
+        let mut n = self.data().data_ref_count.load(Relaxed);
+        loop {
+            if n == 0 {
+                // there is no data.
+                return None;
+            }
+            assert!(n < usize::MAX);
+            match self
+                .data()
+                .data_ref_count
+                .compare_exchange(n, n + 1, Acquire, Relaxed)
+            {
+                Ok(_) => return Some(Arc { weak: self.clone() }),
+                Err(v) => n = v,
+            }
+        }
+    }
+
     fn data(&self) -> &Data<T> {
         unsafe { self.ptr.as_ref() }
     }
@@ -166,6 +185,8 @@ fn main() {
     assert_eq!(DROP_COUNT.load(Relaxed), 0);
     dbg!(&*data);
     let weak = Arc::downgrade(&data);
+    let upgraded = weak.upgrade();
+    dbg!(upgraded);
     dbg!(data);
     assert_eq!(DROP_COUNT.load(Relaxed), 1);
     // make sure it's still there, even if the data itself
