@@ -56,6 +56,7 @@ pub struct Weak<T> {
 }
 
 unsafe impl<T> Send for Weak<T> where T: Send + Sync {}
+unsafe impl<T> Sync for Weak<T> where T: Send + Sync {}
 
 impl<T> Clone for Weak<T> {
     fn clone(&self) -> Self {
@@ -101,11 +102,19 @@ fn main() {
     }
     let data = Arc::new((String::from("hello"), DropMonitor));
     thread::scope(|s| {
-        // test Send for Arc<T>.
+        // tests Send for Arc<T>.
         for _ in 0..10 {
             let data = data.clone();
             s.spawn(move || {
                 dbg!(data);
+                assert_eq!(DROP_COUNT.load(Relaxed), 0);
+            });
+        }
+
+        // tests Sync for Arc<T>
+        for _ in 0..5 {
+            s.spawn(|| {
+                eprintln!("{:?}: {data:#?}", thread::current());
                 assert_eq!(DROP_COUNT.load(Relaxed), 0);
             });
         }
