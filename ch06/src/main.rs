@@ -7,6 +7,7 @@ use std::ptr::NonNull;
 use std::sync::atomic::fence;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use std::thread;
 
 #[derive(Debug)]
 pub struct Arc<T> {
@@ -54,6 +55,8 @@ pub struct Weak<T> {
     ptr: NonNull<Data<T>>,
 }
 
+unsafe impl<T> Send for Weak<T> where T: Send + Sync {}
+
 impl<T> Clone for Weak<T> {
     fn clone(&self) -> Self {
         if self.data().alloc_ref_count.fetch_add(1, Relaxed) > usize::MAX / 2 {
@@ -96,13 +99,18 @@ fn main() {
             DROP_COUNT.fetch_add(1, Relaxed);
         }
     }
-    let a = Arc::new((String::from("hello"), DropMonitor));
-    let b = a.clone();
-    let c = a.clone();
-    dbg!(a);
+    let data = Arc::new((String::from("hello"), DropMonitor));
+    thread::scope(|s| {
+        // test Send for Arc<T>.
+        for _ in 0..10 {
+            let data = data.clone();
+            s.spawn(move || {
+                dbg!(data);
+                assert_eq!(DROP_COUNT.load(Relaxed), 0);
+            });
+        }
+    });
     assert_eq!(DROP_COUNT.load(Relaxed), 0);
-    dbg!(b);
-    assert_eq!(DROP_COUNT.load(Relaxed), 0);
-    dbg!(c);
+    dbg!(data);
     assert_eq!(DROP_COUNT.load(Relaxed), 1);
 }
