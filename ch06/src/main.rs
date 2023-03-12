@@ -88,6 +88,15 @@ struct Data<T> {
 }
 
 fn main() {
-    let arc = Arc::new(String::from("hello"));
-    dbg!(arc);
+    static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+    #[derive(Debug)]
+    struct DropMonitor;
+    impl Drop for DropMonitor {
+        fn drop(&mut self) {
+            DROP_COUNT.fetch_add(1, Relaxed);
+        }
+    }
+    let a = Arc::new((String::from("hello"), DropMonitor));
+    dbg!(a);
+    assert_eq!(DROP_COUNT.load(Relaxed), 1);
 }
