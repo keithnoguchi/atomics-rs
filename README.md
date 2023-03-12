@@ -12,6 +12,7 @@ Kudos to [Mara Bos].
 - [Chapter 1: A channel with `Mutex` and `Condvar`](ch01/src/main.rs)
 - [Chapter 2: A lazy one-time atomic value initialization](ch02/src/main.rs)
 - [Chapter 3: A memory fence with `Acquire`, `Relaxed`, and `Release`](ch03/src/main.rs)
-- [Chapter 4: A *safe* spin lock](ch04/src/main.rs)
+- [Chapter 4: A spin lock](ch04/src/main.rs)
+- [Chapter 5: An one-shot channel](ch05/src/main.rs)
 
 Happy Hacking!
