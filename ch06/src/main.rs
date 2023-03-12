@@ -4,12 +4,24 @@
 
 use std::cell::UnsafeCell;
 use std::ptr::NonNull;
+use std::sync::atomic::fence;
 use std::sync::atomic::AtomicUsize;
-use std::sync::atomic::Ordering::{Acquire, Relaxed};
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
 #[derive(Debug)]
 pub struct Arc<T> {
     weak: Weak<T>,
+}
+
+impl<T> Drop for Arc<T> {
+    fn drop(&mut self) {
+        if self.weak.data().data_ref_count.fetch_sub(1, Release) == 1 {
+            fence(Acquire);
+            unsafe {
+                *self.weak.ptr.as_mut().data.get_mut() = None;
+            }
+        }
+    }
 }
 
 impl<T> Arc<T> {
@@ -29,6 +41,12 @@ impl<T> Arc<T> {
 #[derive(Debug)]
 pub struct Weak<T> {
     ptr: NonNull<Data<T>>,
+}
+
+impl<T> Weak<T> {
+    fn data(&self) -> &Data<T> {
+        unsafe { self.ptr.as_ref() }
+    }
 }
 
 #[derive(Debug)]
