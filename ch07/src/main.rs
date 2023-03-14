@@ -4,11 +4,15 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Instant;
 
+// A conditional compilation.
+//
+// https://stackoverflow.com/questions/59542378/conditional-compilation-for-nightly-vs-stable-rust-or-compiler-version
 #[cfg(feature = "nightly-features")]
 use std::hint::black_box;
 
 #[cfg(not(feature = "nightly-features"))]
-pub const fn black_box<T>(dummy: T) -> T {
+#[inline]
+const fn black_box<T>(dummy: T) -> T {
     dummy
 }
 
