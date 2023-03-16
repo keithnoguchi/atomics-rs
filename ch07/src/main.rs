@@ -23,7 +23,9 @@ fn main() {
     black_box(&A);
 
     thread::spawn(|| loop {
-        black_box(A.compare_exchange(10, 20, Relaxed, Relaxed).is_ok());
+        if A.load(Relaxed) == 10 {
+            black_box(A.compare_exchange(10, 20, Relaxed, Relaxed).is_ok());
+        }
     });
 
     let start = Instant::now();
