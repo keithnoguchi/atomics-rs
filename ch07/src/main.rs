@@ -17,20 +17,23 @@ const fn black_box<T>(dummy: T) -> T {
     dummy
 }
 
-static A: AtomicU64 = AtomicU64::new(0);
+static A: [AtomicU64; 3] = [
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+    AtomicU64::new(0),
+];
 
 fn main() {
     black_box(&A);
 
     thread::spawn(|| loop {
-        if A.load(Relaxed) == 10 {
-            black_box(A.compare_exchange(10, 20, Relaxed, Relaxed).is_ok());
-        }
+        A[0].store(0, Relaxed);
+        A[2].store(0, Relaxed);
     });
 
     let start = Instant::now();
     for _ in 0..1_000_000_000 {
-        black_box(A.load(Relaxed));
+        black_box(A[1].load(Relaxed));
     }
     println!("{:?}", start.elapsed());
 }
