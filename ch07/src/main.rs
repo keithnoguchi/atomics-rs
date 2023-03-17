@@ -1,48 +1,41 @@
-//! Understanding Processors
+//! Demonstration of the memory ordering bug.
 //!
 //! # Examples
 //!
 //! ```
-//! $ cargo +nightly run --release
+//! $ for i in {0..100}; do cargo run -rq; done
 //! ```
+//!
+//! Please run it on ARM64 to reveal the bug.
 
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::compiler_fence;
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::thread;
-use std::time::Instant;
-
-// A conditional compilation.
-//
-// https://stackoverflow.com/questions/59542378/conditional-compilation-for-nightly-vs-stable-rust-or-compiler-version
-#[cfg(feature = "nightly-features")]
-use std::hint::black_box;
-
-#[cfg(not(feature = "nightly-features"))]
-#[inline]
-const fn black_box<T>(dummy: T) -> T {
-    dummy
-}
-
-/// 64 byte alignment.
-#[repr(align(64))]
-struct Aligned(AtomicU64);
-
-static A: [Aligned; 3] = [
-    Aligned(AtomicU64::new(0)),
-    Aligned(AtomicU64::new(0)),
-    Aligned(AtomicU64::new(0)),
-];
 
 fn main() {
-    black_box(&A);
+    let lock = AtomicBool::new(false);
+    let counter = AtomicUsize::new(0);
 
-    thread::spawn(|| loop {
-        A[0].0.store(0, Relaxed);
+    thread::scope(|s| {
+        s.spawn(|| {
+            for _ in 0..1_000_000 {
+                // Acquires the lock, using the wrong memory ordering.
+                while lock.swap(true, Relaxed) {}
+                compiler_fence(Acquire);
+
+                // Non-atomically increments the counter,
+                // while holding the lock.
+                let old = counter.load(Relaxed);
+                let new = old + 1;
+                counter.store(new, Relaxed);
+
+                // Releases the lock, using the wrong memory ordering.
+                compiler_fence(Release);
+                lock.store(false, Relaxed);
+            }
+        });
     });
 
-    let start = Instant::now();
-    for _ in 0..1_000_000_000 {
-        black_box(A[1].0.load(Relaxed));
-    }
-    println!("{:?}", start.elapsed());
+    println!("{}", counter.into_inner());
 }

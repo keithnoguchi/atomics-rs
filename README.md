@@ -16,6 +16,6 @@ Kudos to [Mara Bos] and [the library team].
 - [Chapter 4: A spin lock](ch04/src/main.rs)
 - [Chapter 5: An one-shot channel](ch05/src/main.rs)
 - [Chapter 6: An `Arc<T>` and `Weak<T>`](ch06/src/main.rs)
-- [Chapter 7: Understanding Processors](ch07/src/main.rs)
+- [Chapter 7: Memory Ordering Bug](ch07/src/main.rs)
 
 Happy Hacking!
