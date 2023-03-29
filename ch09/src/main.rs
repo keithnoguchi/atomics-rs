@@ -1,4 +1,11 @@
 //! A spinlock
+//!
+//! # Examples
+//!
+//! ```
+//! $ cargo +nightly run -q --release
+//! 20000000 locks in 3.602962466s
+//! ```
 
 #![forbid(missing_debug_implementations)]
 
@@ -60,6 +67,8 @@ impl<T> DerefMut for Guard<'_, T> {
 
 fn main() {
     let m = Mutex::new(0);
+    #[cfg(feature = "nightly-features")]
+    std::hint::black_box(&m);
 
     let start = Instant::now();
     thread::scope(|s| {
