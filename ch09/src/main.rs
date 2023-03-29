@@ -1,12 +1,20 @@
-//! A mutex
+//! A spinlock
+//!
+//! # Examples
+//!
+//! ```
+//! $ cargo +nightly run -q --release
+//! 20000000 locks in 3.602962466s
+//! ```
 
 #![forbid(missing_debug_implementations)]
 
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
+use std::time::Instant;
 
 #[derive(Debug)]
 pub struct Mutex<T> {
@@ -26,68 +34,54 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> Guard<'_, T> {
-        while self.state.swap(1, Acquire) != 0 {
-            wait(&self.state, 1);
+        while self.state.compare_exchange(0, 1, Acquire, Relaxed).is_err() {
+            std::hint::spin_loop();
         }
-        Guard { mutex: self }
+        Guard { lock: self }
     }
 }
 
 #[derive(Debug)]
 pub struct Guard<'a, T> {
-    mutex: &'a Mutex<T>,
+    lock: &'a Mutex<T>,
 }
 
 impl<T> Drop for Guard<'_, T> {
     fn drop(&mut self) {
-        self.mutex.state.store(0, Release);
-        wake_one(&self.mutex.state);
+        self.lock.state.store(0, Release);
     }
 }
 
 impl<T> Deref for Guard<'_, T> {
     type Target = T;
-
     fn deref(&self) -> &T {
-        unsafe { &*self.mutex.value.get() }
+        unsafe { &*self.lock.value.get() }
     }
 }
 
 impl<T> DerefMut for Guard<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *self.mutex.value.get() }
-    }
-}
-
-fn wait(a: &AtomicU32, expected: u32) {
-    unsafe {
-        libc::syscall(
-            libc::SYS_futex,
-            a as *const AtomicU32,
-            libc::FUTEX_WAIT,
-            expected,
-        );
-    }
-}
-
-fn wake_one(a: &AtomicU32) {
-    unsafe {
-        libc::syscall(libc::SYS_futex, a as *const AtomicU32, libc::FUTEX_WAKE, 1);
+        unsafe { &mut *self.lock.value.get() }
     }
 }
 
 fn main() {
-    let counter = Mutex::new(0);
+    let m = Mutex::new(0);
+    #[cfg(feature = "nightly-features")]
+    std::hint::black_box(&m);
 
+    let start = Instant::now();
     thread::scope(|s| {
-        for _ in 0..10 {
+        for _ in 0..4 {
             s.spawn(|| {
-                for _ in 0..1000 {
-                    *counter.lock() += 1;
+                for _ in 0..5_000_000 {
+                    *m.lock() += 1;
                 }
             });
         }
     });
 
-    assert_eq!(*counter.lock(), 10 * 1000);
+    let duration = start.elapsed();
+    println!("{} locks in {:?}", *m.lock(), duration);
+    assert_eq!(*m.lock(), 4 * 5_000_000);
 }
