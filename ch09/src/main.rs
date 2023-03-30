@@ -5,7 +5,7 @@
 //! # Examples
 //!
 //! ```
-//! $ cargo r +nightly -q --release
+//! $ cargo +nightly run -qr
 //! 20000000 locks in 4.058210898s
 //! ```
 
@@ -73,7 +73,7 @@ impl<T> DerefMut for Guard<'_, T> {
 
 fn main() {
     let m = Mutex::new(0);
-    #[cfg(feature = "nightly_features")]
+    #[cfg(feature = "nightly-features")]
     std::hint::black_box(&m);
 
     let start = Instant::now();
