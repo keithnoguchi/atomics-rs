@@ -1,10 +1,12 @@
-//! A spinlock
+//! A mutex with [`atomic_wait`] crate
+//!
+//! [`atomic_wait`]: https://lib.rs/atomic-wait
 //!
 //! # Examples
 //!
 //! ```
-//! $ cargo +nightly run -q --release
-//! 20000000 locks in 3.602962466s
+//! $ cargo r +nightly -q --release
+//! 20000000 locks in 4.058210898s
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -12,9 +14,11 @@
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use std::sync::atomic::Ordering::{Acquire, Release};
 use std::thread;
 use std::time::Instant;
+
+use atomic_wait::{wait, wake_one};
 
 #[derive(Debug)]
 pub struct Mutex<T> {
@@ -34,8 +38,8 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> Guard<'_, T> {
-        while self.state.compare_exchange(0, 1, Acquire, Relaxed).is_err() {
-            std::hint::spin_loop();
+        while self.state.swap(1, Acquire) != 0 {
+            wait(&self.state, 1);
         }
         Guard { lock: self }
     }
@@ -49,11 +53,13 @@ pub struct Guard<'a, T> {
 impl<T> Drop for Guard<'_, T> {
     fn drop(&mut self) {
         self.lock.state.store(0, Release);
+        wake_one(&self.lock.state);
     }
 }
 
 impl<T> Deref for Guard<'_, T> {
     type Target = T;
+
     fn deref(&self) -> &T {
         unsafe { &*self.lock.value.get() }
     }
@@ -67,7 +73,7 @@ impl<T> DerefMut for Guard<'_, T> {
 
 fn main() {
     let m = Mutex::new(0);
-    #[cfg(feature = "nightly-features")]
+    #[cfg(feature = "nightly_features")]
     std::hint::black_box(&m);
 
     let start = Instant::now();
@@ -80,8 +86,8 @@ fn main() {
             });
         }
     });
-
     let duration = start.elapsed();
+
     println!("{} locks in {:?}", *m.lock(), duration);
     assert_eq!(*m.lock(), 4 * 5_000_000);
 }

@@ -8,3 +8,4 @@ default = []
 nightly-features = []
 
 [dependencies]
+atomic-wait = "1.1.0"
