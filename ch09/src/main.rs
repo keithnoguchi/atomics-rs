@@ -1,12 +1,14 @@
-//! A mutex with [`atomic_wait`] crate
+//! A Mutex<T> with three states
 //!
-//! [`atomic_wait`]: https://lib.rs/atomic-wait
+//! 0: no lock
+//! 1: locked, no waiter
+//! 2: locked, waiters
 //!
 //! # Examples
 //!
 //! ```
-//! $ cargo +nightly run -qr
-//! 20000000 locks in 4.058210898s
+//! $ cargo +nightly run -rq
+//! 20000000 locks in 1.496873575s
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -14,7 +16,7 @@
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
 use std::time::Instant;
 
@@ -38,8 +40,10 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> Guard<'_, T> {
-        while self.state.swap(1, Acquire) != 0 {
-            wait(&self.state, 1);
+        if self.state.compare_exchange(0, 1, Acquire, Relaxed).is_err() {
+            while self.state.swap(2, Acquire) != 0 {
+                wait(&self.state, 2);
+            }
         }
         Guard { lock: self }
     }
@@ -52,8 +56,9 @@ pub struct Guard<'a, T> {
 
 impl<T> Drop for Guard<'_, T> {
     fn drop(&mut self) {
-        self.lock.state.store(0, Release);
-        wake_one(&self.lock.state);
+        if self.lock.state.swap(0, Release) == 2 {
+            wake_one(&self.lock.state);
+        }
     }
 }
 
