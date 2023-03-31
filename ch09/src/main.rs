@@ -1,4 +1,8 @@
-//! A Mutex<T> with two states
+//! A Mutex<T> with three states
+//!
+//! 0: no lock
+//! 1: locked, no waiter
+//! 2: locked, waiters
 //!
 //! # Examples
 //!
