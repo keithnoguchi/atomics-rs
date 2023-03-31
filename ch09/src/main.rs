@@ -36,6 +36,12 @@ fn main() {
 
     let start = Instant::now();
     thread::scope(|s| {
+        for _ in 0..4 {
+            s.spawn(|| {
+                for _ in 0..5_000_000 {
+                }
+            });
+        }
     });
     let duration = start.elapsed();
 
