@@ -2,11 +2,13 @@
 //!
 //! # Examples
 //!
-//! ~75ns/lock
+//! A bit slower than the non spin version in thie particular
+//! senario, e.g. highly contendet locks.  But it's still righly
+//! 80ns/lock.
 //!
 //! ```
 //! $ cargo +nightly run -qr
-//! 20000000 locks in 1.50801231s
+//! 20000000 locks in 1.633000813s
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -14,7 +16,7 @@
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
 use std::time::Instant;
 
@@ -38,23 +40,25 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> Guard<'_, T> {
-        self.spin_and_wait();
+        Self::lock_contended(&self.state);
         Guard { lock: self }
     }
 
-    fn spin_and_wait(&self) {
-        // spin first.
-        let mut tries = 100;
-        while tries > 0 {
-            if self.state.swap(1, Acquire) == 0 {
-                return;
-            }
-            tries -= 1;
+    fn lock_contended(state: &AtomicU32) {
+        // spin in case there is no waiter.
+        let mut spin_count = 0;
+        while state.load(Relaxed) == 1 && spin_count < 100 {
+            spin_count += 1;
+            std::hint::spin_loop();
+        }
+        // see if I can win the contention.
+        if state.compare_exchange(0, 1, Acquire, Relaxed).is_ok() {
+            return;
         }
 
-        // then wait.
-        while self.state.swap(2, Acquire) != 0 {
-            wait(&self.state, 2);
+        // or just falls back to wait.
+        while state.swap(2, Acquire) != 0 {
+            wait(state, 2);
         }
     }
 }
