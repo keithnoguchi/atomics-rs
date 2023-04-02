@@ -1,4 +1,4 @@
-//! A vanilla spinlock
+//! A Mutex<T> with spin and wait
 //!
 //! # Examples
 //!
