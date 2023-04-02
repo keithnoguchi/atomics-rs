@@ -14,7 +14,7 @@
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use std::sync::atomic::Ordering::{Acquire, Release};
 use std::thread;
 use std::time::Instant;
 
@@ -38,15 +38,24 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> Guard<'_, T> {
-        if self.state.compare_exchange(0, 1, Acquire, Relaxed).is_err() {
-            // there is a contention.  Once you win, meaning the state
-            // was 0, then you can proceed.
-            while self.state.swap(2, Acquire) != 0 {
-                // or just wait in case the state is contended, e.g. 2.
-                wait(&self.state, 2);
-            }
-        }
+        self.spin_and_wait();
         Guard { lock: self }
+    }
+
+    fn spin_and_wait(&self) {
+        // spin first.
+        let mut tries = 100;
+        while tries > 0 {
+            if self.state.swap(1, Acquire) == 0 {
+                return;
+            }
+            tries -= 1;
+        }
+
+        // then wait.
+        while self.state.swap(2, Acquire) != 0 {
+            wait(&self.state, 2);
+        }
     }
 }
 
