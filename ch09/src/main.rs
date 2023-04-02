@@ -2,13 +2,13 @@
 //!
 //! # Examples
 //!
-//! A bit slower than the non spin version in thie particular
-//! senario, e.g. highly contendet locks.  But it's still righly
-//! 80ns/lock.
+//! `#[cold]` brings the number down to 1.5s for 20m locks,
+//! which is quite equivalent to the non-spin version in this
+//! particular scenario, which is roughly 75ns/lock.
 //!
 //! ```
 //! $ cargo +nightly run -qr
-//! 20000000 locks in 1.633000813s
+//! 20000000 locks in 1.488637562s
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -44,6 +44,7 @@ impl<T> Mutex<T> {
         Guard { lock: self }
     }
 
+    #[cold]
     fn lock_contended(state: &AtomicU32) {
         // spin in case there is no waiter.
         let mut spin_count = 0;
