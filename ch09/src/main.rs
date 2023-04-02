@@ -1,14 +1,20 @@
-//! A Mutex<T> with three states
-//!
-//! 0: no lock
-//! 1: locked, no waiter
-//! 2: locked, waiters
+//! A Mutex<T> with spin and wait
 //!
 //! # Examples
 //!
+//! `#[cold]` brings the number down to 1.5s for 20m locks,
+//! which is quite equivalent to the non-spin version in this
+//! particular scenario, which is roughly 75ns/lock.
+//!
+//! By the way, `#[inline]` does actually slows down a bit,
+//! and removing the `#[cold]` optimization.
+//!
+//! And I bet the optimization behavior fully depends on the
+//! target platforms.  What a fun optimization with benchmarking.
+//!
 //! ```
-//! $ cargo +nightly run -rq
-//! 20000000 locks in 1.496873575s
+//! $ cargo +nightly run -qr
+//! 20000000 locks in 1.488637562s
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -40,12 +46,27 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> Guard<'_, T> {
-        if self.state.compare_exchange(0, 1, Acquire, Relaxed).is_err() {
-            while self.state.swap(2, Acquire) != 0 {
-                wait(&self.state, 2);
-            }
-        }
+        Self::lock_contended(&self.state);
         Guard { lock: self }
+    }
+
+    #[cold]
+    fn lock_contended(state: &AtomicU32) {
+        // spin in case there is no waiter.
+        let mut spin_count = 0;
+        while state.load(Relaxed) == 1 && spin_count < 100 {
+            spin_count += 1;
+            std::hint::spin_loop();
+        }
+        // see if I can win the contention.
+        if state.compare_exchange(0, 1, Acquire, Relaxed).is_ok() {
+            return;
+        }
+
+        // or just falls back to wait.
+        while state.swap(2, Acquire) != 0 {
+            wait(state, 2);
+        }
     }
 }
 
@@ -56,6 +77,7 @@ pub struct Guard<'a, T> {
 
 impl<T> Drop for Guard<'_, T> {
     fn drop(&mut self) {
+        // wake up only when there is a waiter, e.g. state 2.
         if self.lock.state.swap(0, Release) == 2 {
             wake_one(&self.lock.state);
         }
@@ -78,7 +100,7 @@ impl<T> DerefMut for Guard<'_, T> {
 
 fn main() {
     let m = Mutex::new(0);
-    #[cfg(feature = "nightly-features")]
+    #[cfg(features = "nightly-features")]
     std::hint::black_box(&m);
 
     let start = Instant::now();
@@ -93,6 +115,6 @@ fn main() {
     });
     let duration = start.elapsed();
 
-    println!("{} locks in {:?}", *m.lock(), duration);
+    println!("{} locks in {:?}", 4 * 5_000_000, duration);
     assert_eq!(*m.lock(), 4 * 5_000_000);
 }
