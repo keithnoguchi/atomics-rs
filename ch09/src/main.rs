@@ -6,6 +6,12 @@
 //! which is quite equivalent to the non-spin version in this
 //! particular scenario, which is roughly 75ns/lock.
 //!
+//! By the way, `#[inline]` does actually slows down a bit,
+//! and removing the `#[cold]` optimization.
+//!
+//! And I bet the optimization behavior fully depends on the
+//! target platforms.  What a fun optimization with benchmarking.
+//!
 //! ```
 //! $ cargo +nightly run -qr
 //! 20000000 locks in 1.488637562s
