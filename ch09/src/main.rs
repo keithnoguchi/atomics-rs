@@ -2,9 +2,11 @@
 //!
 //! # Examples
 //!
+//! ~75ns/lock
+//!
 //! ```
-//! $ cargo +nightly run -rq
-//! 20000000 locks in 3.44102183s
+//! $ cargo +nightly run -qr
+//! 20000000 locks in 1.50801231s
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -12,9 +14,11 @@
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
 use std::time::Instant;
+
+use atomic_wait::{wait, wake_one};
 
 #[derive(Debug)]
 pub struct Mutex<T> {
@@ -34,8 +38,13 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> Guard<'_, T> {
-        while self.state.swap(1, Acquire) != 0 {
-            std::hint::spin_loop();
+        if self.state.compare_exchange(0, 1, Acquire, Relaxed).is_err() {
+            // there is a contention.  Once you win, meaning the state
+            // was 0, then you can proceed.
+            while self.state.swap(2, Acquire) != 0 {
+                // or just wait in case the state is contended, e.g. 2.
+                wait(&self.state, 2);
+            }
         }
         Guard { lock: self }
     }
@@ -48,7 +57,10 @@ pub struct Guard<'a, T> {
 
 impl<T> Drop for Guard<'_, T> {
     fn drop(&mut self) {
-        self.lock.state.store(0, Release);
+        // wake up only when there is a waiter, e.g. state 2.
+        if self.lock.state.swap(0, Release) == 2 {
+            wake_one(&self.lock.state);
+        }
     }
 }
 
