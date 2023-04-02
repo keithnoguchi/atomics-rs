@@ -10,6 +10,8 @@
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::AtomicU32;
+use std::thread;
+use std::time::Instant;
 
 #[derive(Debug)]
 pub struct Mutex<T> {
@@ -34,5 +36,13 @@ fn main() {
     #[cfg(features = "nightly-features")]
     std::hint::black_box(&m);
 
-    dbg!(m);
+    let start = Instant::now();
+    thread::scope(|s| {
+        for _ in 0..4 {
+            s.spawn(|| {});
+        }
+    });
+    let duration = start.elapsed();
+
+    println!("{:?}", duration);
 }
