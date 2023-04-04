@@ -5,8 +5,8 @@
 //! The spin and wait is 10% better time in this particular scenario.
 //!
 //! ```
-//! cargo +nightly run -qr
-//! 20000000 locks in 1.318941107s (65ns/lock)
+//! $ cargo +nightly run -qr
+//! 20000000 locks in 1.194247621s (59ns/lock)
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -39,7 +39,7 @@ impl<T> Mutex<T> {
 
     #[inline]
     pub fn lock(&self) -> Guard<'_, T> {
-        if self.state.swap(1, Acquire) != 0 {
+        if self.state.compare_exchange(0, 1, Acquire, Relaxed).is_err() {
             // contended :(
             Self::lock_contended(&self.state);
         }
