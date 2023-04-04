@@ -1,12 +1,12 @@
-//! A Mutex<T> with three states
+//! A Mutex<T> with spin and wait
 //!
 //! # Examples
 //!
-//! Three states bring back to the spin lock level.
+//! The spin and wait is 10% better time in this particular scenario.
 //!
 //! ```
 //! cargo +nightly run -qr
-//! 20000000 locks in 1.491344648s (74ns/lock)
+//! 20000000 locks in 1.318941107s (65ns/lock)
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -14,7 +14,7 @@
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
 use std::time::Instant;
 
@@ -41,11 +41,30 @@ impl<T> Mutex<T> {
     pub fn lock(&self) -> Guard<'_, T> {
         if self.state.swap(1, Acquire) != 0 {
             // contended :(
-            while self.state.swap(2, Acquire) != 0 {
-                wait(&self.state, 2);
-            }
+            Self::lock_contended(&self.state);
         }
         Guard { lock: self }
+    }
+
+    #[cold]
+    fn lock_contended(state: &AtomicU32) {
+        let mut spins = 0;
+
+        // spin 100 times while there is no waiter.
+        while state.load(Relaxed) == 1 && spins < 100 {
+            spins += 1;
+            std::hint::spin_loop();
+        }
+
+        // lock it!
+        if state.compare_exchange(0, 1, Acquire, Relaxed).is_ok() {
+            return;
+        }
+
+        // or, wait.
+        while state.swap(2, Acquire) != 0 {
+            wait(state, 2);
+        }
     }
 }
 
