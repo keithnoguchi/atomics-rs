@@ -27,7 +27,9 @@ pub struct Condvar {
 
 impl Condvar {
     pub const fn new() -> Self {
-        Self { counter: AtomicU32::new(0) }
+        Self {
+            counter: AtomicU32::new(0),
+        }
     }
 
     #[inline]
