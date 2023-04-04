@@ -4,6 +4,7 @@
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::AtomicU32;
+use std::thread;
 
 #[derive(Debug)]
 pub struct Condvar {
@@ -24,6 +25,9 @@ pub struct Mutex<T> {
     value: UnsafeCell<T>,
 }
 
+unsafe impl<T> Send for Mutex<T> where T: Send {}
+unsafe impl<T> Sync for Mutex<T> where T: Send {}
+
 impl<T> Mutex<T> {
     pub const fn new(value: T) -> Self {
         Self {
@@ -37,6 +41,17 @@ fn main() {
     let mutex = Mutex::new(0);
     let condvar = Condvar::new();
 
-    dbg!(mutex);
-    dbg!(condvar);
+    let mut wakeups = 0;
+
+    thread::scope(|s| {
+        s.spawn(|| {
+            dbg!(&mutex);
+            dbg!(&condvar);
+        });
+
+        dbg!(&mutex);
+        dbg!(&condvar);
+    });
+
+    assert!(wakeups < 10);
 }
