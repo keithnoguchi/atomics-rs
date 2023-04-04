@@ -1,4 +1,11 @@
 //! A Condvar and Mutex<T>
+//!
+//! # Examples
+//!
+//! ```
+//! $ cargo run -qr
+//! wakeups = 16
+//! ```
 
 #![forbid(missing_debug_implementations)]
 
@@ -9,7 +16,7 @@ use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
 use std::time::Duration;
 
-use atomic_wait::{wait, wake_one};
+use atomic_wait::{wait, wake_all, wake_one};
 
 #[derive(Debug)]
 pub struct Condvar {
@@ -34,6 +41,11 @@ impl Condvar {
     pub fn notify_one(&self) {
         self.counter.fetch_add(1, Relaxed);
         wake_one(&self.counter);
+    }
+
+    pub fn notify_all(&self) {
+        self.counter.fetch_add(1, Relaxed);
+        wake_all(&self.counter);
     }
 }
 
@@ -95,21 +107,23 @@ fn main() {
     let mut wakeups = 0;
 
     thread::scope(|s| {
-        s.spawn(|| {
-            for _ in 0..10 {
-                *mutex.lock() += 10;
-                thread::sleep(Duration::from_nanos(10));
-                condvar.notify_one();
-            }
-        });
+        for _ in 0..4 {
+            s.spawn(|| {
+                for _ in 0..5 {
+                    *mutex.lock() += 10;
+                    thread::sleep(Duration::from_nanos(10));
+                    condvar.notify_one();
+                }
+            });
+        }
 
         let mut m = mutex.lock();
-        while *m < 100 {
+        while *m < 200 {
             m = condvar.wait(m);
             wakeups += 1;
         }
     });
 
     println!("wakeups = {wakeups}");
-    assert!(wakeups < 15); // 15 instead of 11 just for thundering hurd
+    assert!(wakeups < 25); // just in case of the thundering hurd issue
 }
