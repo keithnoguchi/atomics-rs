@@ -4,6 +4,7 @@
 
 use std::cell::UnsafeCell;
 use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering::{Acquire, Release};
 use std::thread;
 
 #[derive(Debug)]
@@ -35,6 +36,25 @@ impl<T> Mutex<T> {
             value: UnsafeCell::new(value),
         }
     }
+
+    pub fn lock(&self) -> Guard<T> {
+        while self.state.swap(1, Acquire) != 0 {
+            // spin it as a first try!
+            std::hint::spin_loop();
+        }
+        Guard { lock: self }
+    }
+}
+
+#[derive(Debug)]
+pub struct Guard<'a, T> {
+    lock: &'a Mutex<T>,
+}
+
+impl<T> Drop for Guard<'_, T> {
+    fn drop(&mut self) {
+        self.lock.state.store(0, Release);
+    }
 }
 
 fn main() {
@@ -45,11 +65,15 @@ fn main() {
 
     thread::scope(|s| {
         s.spawn(|| {
-            dbg!(&mutex);
+            for _ in 0..100 {
+                // just check the lock and drop.
+                let m = mutex.lock();
+            }
             dbg!(&condvar);
         });
 
-        dbg!(&mutex);
+        let m = mutex.lock();
+        dbg!(&m);
         dbg!(&condvar);
     });
 
