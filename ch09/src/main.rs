@@ -5,8 +5,11 @@
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::{Acquire, Release};
+use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
+use std::time::Duration;
+
+use atomic_wait::{wait, wake_one};
 
 #[derive(Debug)]
 pub struct Condvar {
@@ -18,6 +21,19 @@ impl Condvar {
         Self {
             counter: AtomicU32::new(0),
         }
+    }
+
+    pub fn wait<'a, T>(&self, guard: Guard<'a, T>) -> Guard<'a, T> {
+        let counter = self.counter.load(Relaxed);
+        let mutex = guard.lock;
+        drop(guard); // unlocks the mutex through Drop here.
+        wait(&self.counter, counter); // wait if no notification happens.
+        mutex.lock()
+    }
+
+    pub fn notify_one(&self) {
+        self.counter.fetch_add(1, Relaxed);
+        wake_one(&self.counter);
     }
 }
 
@@ -80,16 +96,20 @@ fn main() {
 
     thread::scope(|s| {
         s.spawn(|| {
-            *mutex.lock() = 123;
-            dbg!(&condvar); // notify_one()
+            for _ in 0..10 {
+                *mutex.lock() += 10;
+                thread::sleep(Duration::from_nanos(10));
+                condvar.notify_one();
+            }
         });
 
-        while *mutex.lock() < 100 {
-            let _m = mutex.lock();
-            dbg!(&condvar); // wait()
+        let mut m = mutex.lock();
+        while *m < 100 {
+            m = condvar.wait(m);
             wakeups += 1;
         }
     });
 
-    assert!(wakeups < 10);
+    println!("wakeups = {wakeups}");
+    assert!(wakeups < 15); // 15 instead of 11 just for thundering hurd
 }
