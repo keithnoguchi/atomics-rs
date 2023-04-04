@@ -1,12 +1,12 @@
-//! A Condvar and Mutex<T>
+//! A Mutex<T> with three states
 //!
 //! # Examples
 //!
-//! wait/wake adds 50% more time.
+//! Three states bring back to the spin lock level.
 //!
 //! ```
 //! cargo +nightly run -qr
-//! 20000000 locks in 2.966500125s (148ns/lock)
+//! 20000000 locks in 1.491344648s (74ns/lock)
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -39,8 +39,11 @@ impl<T> Mutex<T> {
 
     #[inline]
     pub fn lock(&self) -> Guard<'_, T> {
-        while self.state.swap(1, Acquire) != 0 {
-            wait(&self.state, 1);
+        if self.state.swap(1, Acquire) != 0 {
+            // contended :(
+            while self.state.swap(2, Acquire) != 0 {
+                wait(&self.state, 2);
+            }
         }
         Guard { lock: self }
     }
@@ -53,8 +56,9 @@ pub struct Guard<'a, T> {
 
 impl<T> Drop for Guard<'_, T> {
     fn drop(&mut self) {
-        self.lock.state.store(0, Release);
-        wake_one(&self.lock.state);
+        if self.lock.state.swap(0, Release) != 1 {
+            wake_one(&self.lock.state);
+        }
     }
 }
 
