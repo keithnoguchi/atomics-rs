@@ -75,7 +75,7 @@ const LOCKS: usize = 5_000_000;
 
 fn main() {
     let m = Mutex::new(0);
-    #[cfg(feature = "nightly_features")]
+    #[cfg(feature = "nightly-features")]
     std::hint::black_box(&m);
 
     let start = Instant::now();
