@@ -2,6 +2,8 @@
 //!
 //! # Examples
 //!
+//! wait/wake adds 50% more time.
+//!
 //! ```
 //! cargo +nightly run -qr
 //! 20000000 locks in 2.966500125s (148ns/lock)
