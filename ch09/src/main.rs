@@ -68,8 +68,7 @@ impl<T> Mutex<T> {
 
     pub fn lock(&self) -> Guard<T> {
         while self.state.swap(1, Acquire) != 0 {
-            // spin it as a first try!
-            std::hint::spin_loop();
+            wait(&self.state, 1)
         }
         Guard { lock: self }
     }
