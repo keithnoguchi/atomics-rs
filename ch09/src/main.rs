@@ -3,6 +3,7 @@
 #![forbid(missing_debug_implementations)]
 
 use std::cell::UnsafeCell;
+use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::{Acquire, Release};
 use std::thread;
@@ -57,6 +58,20 @@ impl<T> Drop for Guard<'_, T> {
     }
 }
 
+impl<T> Deref for Guard<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe { &*self.lock.value.get() }
+    }
+}
+
+impl<T> DerefMut for Guard<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.lock.value.get() }
+    }
+}
+
 fn main() {
     let mutex = Mutex::new(0);
     let condvar = Condvar::new();
@@ -65,16 +80,15 @@ fn main() {
 
     thread::scope(|s| {
         s.spawn(|| {
-            for _ in 0..100 {
-                // just check the lock and drop.
-                let m = mutex.lock();
-            }
-            dbg!(&condvar);
+            *mutex.lock() = 123;
+            dbg!(&condvar); // notify_one()
         });
 
-        let m = mutex.lock();
-        dbg!(&m);
-        dbg!(&condvar);
+        while *mutex.lock() < 100 {
+            let _m = mutex.lock();
+            dbg!(&condvar); // wait()
+            wakeups += 1;
+        }
     });
 
     assert!(wakeups < 10);
