@@ -1,8 +1,6 @@
-//! A Condvar and Mutex<T>
+//! A Mutex<T> and Condvar
 //!
 //! # Examples
-//!
-//! The spin and wait is 10% better time in this particular scenario.
 //!
 //! ```
 //! $ cargo +nightly run -qr
