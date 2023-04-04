@@ -18,6 +18,6 @@ Kudos to [Mara Bos] and [the library team].
 - [Chapter 6: An `Arc<T>` and `Weak<T>`](ch06/src/main.rs)
 - [Chapter 7: A Memory Ordering Bug](ch07/src/main.rs)
 - [Chapter 8: `wait()` and `wake_one()` with `futex(2)`](ch08/src/main.rs)
-- [Chapter 9: A `Condvar` and `Mutex<T>`](ch09/src/main.rs)
+- [Chapter 9: A spin lock `Mutex<T>`](ch09/src/main.rs)
 
 Happy Hacking!
