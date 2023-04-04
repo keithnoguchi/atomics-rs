@@ -16,6 +16,8 @@ use std::sync::atomic::Ordering::{Acquire, Release};
 use std::thread;
 use std::time::Instant;
 
+use atomic_wait::{wait, wake_one};
+
 #[derive(Debug)]
 pub struct Mutex<T> {
     state: AtomicU32,
@@ -36,7 +38,7 @@ impl<T> Mutex<T> {
     #[inline]
     pub fn lock(&self) -> Guard<'_, T> {
         while self.state.swap(1, Acquire) != 0 {
-            std::hint::spin_loop();
+            wait(&self.state, 1);
         }
         Guard { lock: self }
     }
@@ -50,6 +52,7 @@ pub struct Guard<'a, T> {
 impl<T> Drop for Guard<'_, T> {
     fn drop(&mut self) {
         self.lock.state.store(0, Release);
+        wake_one(&self.lock.state);
     }
 }
 
