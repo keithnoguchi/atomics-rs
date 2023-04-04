@@ -1,20 +1,10 @@
-//! A Mutex<T> with spin and wait
+//! A Mutex<T> and Condvar
 //!
 //! # Examples
 //!
-//! `#[cold]` brings the number down to 1.5s for 20m locks,
-//! which is quite equivalent to the non-spin version in this
-//! particular scenario, which is roughly 75ns/lock.
-//!
-//! By the way, `#[inline]` does actually slows down a bit,
-//! and removing the `#[cold]` optimization.
-//!
-//! And I bet the optimization behavior fully depends on the
-//! target platforms.  What a fun optimization with benchmarking.
-//!
 //! ```
 //! $ cargo +nightly run -qr
-//! 20000000 locks in 1.488637562s
+//! 17744 wakeups for 40000 notify_one() call (44.36%) in 529.856108ms
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -24,9 +14,43 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use atomic_wait::{wait, wake_one};
+use atomic_wait::{wait, wake_all, wake_one};
+
+#[derive(Debug)]
+pub struct Condvar {
+    counter: AtomicU32,
+}
+
+impl Condvar {
+    pub const fn new() -> Self {
+        Self {
+            counter: AtomicU32::new(0),
+        }
+    }
+
+    #[inline]
+    pub fn notify_one(&self) {
+        self.counter.fetch_add(1, Relaxed);
+        wake_one(&self.counter);
+    }
+
+    #[inline]
+    pub fn notify_all(&self) {
+        self.counter.fetch_add(1, Relaxed);
+        wake_all(&self.counter);
+    }
+
+    #[inline]
+    pub fn wait<'a, T>(&self, guard: Guard<'a, T>) -> Guard<'a, T> {
+        let counter = self.counter.load(Relaxed);
+        let lock = guard.lock;
+        drop(guard);
+        wait(&self.counter, counter);
+        lock.lock()
+    }
+}
 
 #[derive(Debug)]
 pub struct Mutex<T> {
@@ -45,25 +69,31 @@ impl<T> Mutex<T> {
         }
     }
 
+    #[inline]
     pub fn lock(&self) -> Guard<'_, T> {
-        Self::lock_contended(&self.state);
+        if self.state.compare_exchange(0, 1, Acquire, Relaxed).is_err() {
+            // contended :(
+            Self::lock_contended(&self.state);
+        }
         Guard { lock: self }
     }
 
     #[cold]
     fn lock_contended(state: &AtomicU32) {
-        // spin in case there is no waiter.
-        let mut spin_count = 0;
-        while state.load(Relaxed) == 1 && spin_count < 100 {
-            spin_count += 1;
+        let mut spins = 0;
+
+        // spin 100 times while there is no waiter.
+        while state.load(Relaxed) == 1 && spins < 100 {
+            spins += 1;
             std::hint::spin_loop();
         }
-        // see if I can win the contention.
+
+        // lock it!
         if state.compare_exchange(0, 1, Acquire, Relaxed).is_ok() {
             return;
         }
 
-        // or just falls back to wait.
+        // or, wait.
         while state.swap(2, Acquire) != 0 {
             wait(state, 2);
         }
@@ -77,8 +107,7 @@ pub struct Guard<'a, T> {
 
 impl<T> Drop for Guard<'_, T> {
     fn drop(&mut self) {
-        // wake up only when there is a waiter, e.g. state 2.
-        if self.lock.state.swap(0, Release) == 2 {
+        if self.lock.state.swap(0, Release) != 1 {
             wake_one(&self.lock.state);
         }
     }
@@ -98,23 +127,42 @@ impl<T> DerefMut for Guard<'_, T> {
     }
 }
 
+const WORKERS: usize = 4;
+const LOCKS: usize = 10_000;
+
 fn main() {
     let m = Mutex::new(0);
-    #[cfg(features = "nightly-features")]
+    #[cfg(feature = "nightly-features")]
     std::hint::black_box(&m);
 
+    let mut wakeups = 0;
+    let cond = Condvar::new();
     let start = Instant::now();
     thread::scope(|s| {
-        for _ in 0..4 {
+        for _ in 0..WORKERS {
             s.spawn(|| {
-                for _ in 0..5_000_000 {
+                for _ in 0..LOCKS {
                     *m.lock() += 1;
+                    thread::sleep(Duration::from_nanos(10));
+                    cond.notify_one();
                 }
             });
+        }
+
+        let mut lock = m.lock();
+        while *lock != WORKERS * LOCKS {
+            lock = cond.wait(lock);
+            wakeups += 1;
         }
     });
     let duration = start.elapsed();
 
-    println!("{} locks in {:?}", 4 * 5_000_000, duration);
-    assert_eq!(*m.lock(), 4 * 5_000_000);
+    println!(
+        "{} wakeups for {} notify_one() call ({}%) in {:?}",
+        wakeups,
+        WORKERS * LOCKS,
+        (wakeups as f32) / ((WORKERS * LOCKS) as f32) * 100.0,
+        duration,
+    );
+    assert!(wakeups <= WORKERS * LOCKS + 10);
 }
