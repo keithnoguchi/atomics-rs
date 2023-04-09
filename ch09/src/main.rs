@@ -1,10 +1,10 @@
-//! A Mutex<T> and Condvar
+//! A spin lock
 //!
 //! # Examples
 //!
 //! ```
-//! $ cargo +nightly run -qr
-//! 17744 wakeups for 40000 notify_one() call (44.36%) in 529.856108ms
+//! $ cargo +nightly r -qr
+//! 20000000 locks in 1.783934859s (89.20ns/lock)
 //! ```
 
 #![forbid(missing_debug_implementations)]
@@ -12,45 +12,9 @@
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering::{Acquire, Relaxed, Release};
+use std::sync::atomic::Ordering::{Acquire, Release};
 use std::thread;
-use std::time::{Duration, Instant};
-
-use atomic_wait::{wait, wake_all, wake_one};
-
-#[derive(Debug)]
-pub struct Condvar {
-    counter: AtomicU32,
-}
-
-impl Condvar {
-    pub const fn new() -> Self {
-        Self {
-            counter: AtomicU32::new(0),
-        }
-    }
-
-    #[inline]
-    pub fn notify_one(&self) {
-        self.counter.fetch_add(1, Relaxed);
-        wake_one(&self.counter);
-    }
-
-    #[inline]
-    pub fn notify_all(&self) {
-        self.counter.fetch_add(1, Relaxed);
-        wake_all(&self.counter);
-    }
-
-    #[inline]
-    pub fn wait<'a, T>(&self, guard: Guard<'a, T>) -> Guard<'a, T> {
-        let counter = self.counter.load(Relaxed);
-        let lock = guard.lock;
-        drop(guard);
-        wait(&self.counter, counter);
-        lock.lock()
-    }
-}
+use std::time::Instant;
 
 #[derive(Debug)]
 pub struct Mutex<T> {
@@ -69,47 +33,22 @@ impl<T> Mutex<T> {
         }
     }
 
-    #[inline]
     pub fn lock(&self) -> Guard<'_, T> {
-        if self.state.compare_exchange(0, 1, Acquire, Relaxed).is_err() {
-            // contended :(
-            Self::lock_contended(&self.state);
-        }
-        Guard { lock: self }
-    }
-
-    #[cold]
-    fn lock_contended(state: &AtomicU32) {
-        let mut spins = 0;
-
-        // spin 100 times while there is no waiter.
-        while state.load(Relaxed) == 1 && spins < 100 {
-            spins += 1;
+        while self.state.swap(1, Acquire) != 0 {
             std::hint::spin_loop();
         }
-
-        // lock it!
-        if state.compare_exchange(0, 1, Acquire, Relaxed).is_ok() {
-            return;
-        }
-
-        // or, wait.
-        while state.swap(2, Acquire) != 0 {
-            wait(state, 2);
-        }
+        Guard { mutex: self }
     }
 }
 
 #[derive(Debug)]
 pub struct Guard<'a, T> {
-    lock: &'a Mutex<T>,
+    mutex: &'a Mutex<T>,
 }
 
 impl<T> Drop for Guard<'_, T> {
     fn drop(&mut self) {
-        if self.lock.state.swap(0, Release) != 1 {
-            wake_one(&self.lock.state);
-        }
+        self.mutex.state.swap(0, Release);
     }
 }
 
@@ -117,52 +56,38 @@ impl<T> Deref for Guard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        unsafe { &*self.lock.value.get() }
+        unsafe { &*self.mutex.value.get() }
     }
 }
 
 impl<T> DerefMut for Guard<'_, T> {
     fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *self.lock.value.get() }
+        unsafe { &mut *self.mutex.value.get() }
     }
 }
 
-const WORKERS: usize = 4;
-const LOCKS: usize = 10_000;
-
 fn main() {
     let m = Mutex::new(0);
-    #[cfg(feature = "nightly-features")]
-    std::hint::black_box(&m);
+    const WORKERS: usize = 4;
+    const LOCKS: usize = 5_000_000;
 
-    let mut wakeups = 0;
-    let cond = Condvar::new();
     let start = Instant::now();
     thread::scope(|s| {
         for _ in 0..WORKERS {
             s.spawn(|| {
                 for _ in 0..LOCKS {
                     *m.lock() += 1;
-                    thread::sleep(Duration::from_nanos(10));
-                    cond.notify_one();
                 }
             });
-        }
-
-        let mut lock = m.lock();
-        while *lock != WORKERS * LOCKS {
-            lock = cond.wait(lock);
-            wakeups += 1;
         }
     });
     let duration = start.elapsed();
 
+    debug_assert_eq!(*m.lock(), WORKERS * LOCKS);
     println!(
-        "{} wakeups for {} notify_one() call ({}%) in {:?}",
-        wakeups,
+        "{} locks in {:?} ({:.2}ns/lock)",
         WORKERS * LOCKS,
-        (wakeups as f32) / ((WORKERS * LOCKS) as f32) * 100.0,
         duration,
+        duration.as_nanos() as f64 / (WORKERS * LOCKS) as f64,
     );
-    assert!(wakeups <= WORKERS * LOCKS + 10);
 }
